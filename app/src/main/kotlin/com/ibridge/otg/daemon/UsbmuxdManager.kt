@@ -102,7 +102,7 @@ class UsbmuxdManager(
             }
 
             // Reuse an alive instance from a previous session.
-            val oldPid = readPid()
+            val oldPid = readPid() ?: readPidRoot()
             if (oldPid != null && isProcessAlive(oldPid) && isPortOpen(prefs.daemonPort)) {
                 _state.value = DaemonState.Running(prefs.daemonPort, oldPid)
                 logs.i("usbmuxd", "复用已运行的实例 pid=$oldPid port=${prefs.daemonPort}")
@@ -195,7 +195,7 @@ class UsbmuxdManager(
 
     suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
-            val pid = readPid() ?: (state.value as? DaemonState.Running)?.pid
+            val pid = readPid() ?: readPidRoot() ?: (state.value as? DaemonState.Running)?.pid
             if (pid == null) {
                 pidFile.delete()
                 _state.value = DaemonState.Stopped
@@ -242,6 +242,13 @@ class UsbmuxdManager(
 
     private fun readPid(): Long? = runCatching {
         pidFile.readText().trim().toLongOrNull()
+    }.getOrNull()
+
+    private suspend fun readPidRoot(): Long? = runCatching {
+        root.run(
+            "cat " + RootShell.quote(pidFile.absolutePath) + " 2>/dev/null",
+            timeoutMs = 8_000,
+        ).stdout.trim().toLongOrNull()
     }.getOrNull()
 
     private fun isProcessAlive(pid: Long): Boolean =
