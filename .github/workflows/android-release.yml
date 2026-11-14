@@ -1,0 +1,130 @@
+name: Android Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build arm64-v8a APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform 37 and build tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --channel=3 --install \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
+            "platform-tools"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION="1.0.${GITHUB_RUN_NUMBER}"
+            TAG="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage native binaries (optional)
+        env:
+          IBRIDGE_BINARIES_URL: ${{ secrets.IBRIDGE_BINARIES_URL }}
+        run: |
+          chmod +x scripts/fetch-binaries.sh
+          bash scripts/fetch-binaries.sh
+
+      - name: Prepare release keystore (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.IBRIDGE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.IBRIDGE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.IBRIDGE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.IBRIDGE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "${KEYSTORE_BASE64}" ]]; then
+            echo "No IBRIDGE_KEYSTORE_BASE64 secret; the release APK will use the debug signing key."
+            exit 0
+          fi
+          echo "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/ibridge-release.jks"
+          {
+            echo "IBRIDGE_KEYSTORE=${RUNNER_TEMP}/ibridge-release.jks"
+            echo "IBRIDGE_KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
+            echo "IBRIDGE_KEY_ALIAS=${KEY_ALIAS}"
+            echo "IBRIDGE_KEY_PASSWORD=${KEY_PASSWORD}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build release APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: ${{ steps.vars.outputs.version }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
+          if [[ -z "${APK}" ]]; then
+            echo "Release APK not found" >&2
+            exit 1
+          fi
+          cp "${APK}" "dist/iBridge-${{ steps.vars.outputs.version }}-arm64-v8a.apk"
+          ls -lh dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iBridge-${{ steps.vars.outputs.version }}-arm64-v8a
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: iBridge ${{ steps.vars.outputs.version }}
+          files: dist/*.apk
+          generate_release_notes: true
+          make_latest: true
+          body: |
+            iBridge ${{ steps.vars.outputs.version }}（arm64-v8a）
+
+            - Miuix UI，支持明暗主题与主题色
+            - USB OTG + usbmuxd + lockdownd 配对
+            - IPA 安装 / 应用列表 / 卸载
+            - zsign 重签（p12 + mobileprovision，可改 BundleID）
+
+            > 原生工具链可通过 `IBRIDGE_BINARIES_URL` 注入；未注入时请在应用内导入工具包。
