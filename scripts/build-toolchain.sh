@@ -83,12 +83,14 @@ extract() {
 # ---------------------------------------------------------------- sources
 log "download sources"
 fetch "https://github.com/openssl/openssl/releases/download/openssl-3.5.1/openssl-3.5.1.tar.gz" "$WORK/openssl.tar.gz"
+fetch "https://github.com/curl/curl/releases/download/curl-8_14_1/curl-8.14.1.tar.gz" "$WORK/curl.tar.gz"
 fetch "https://github.com/libimobiledevice/libplist/archive/refs/tags/2.8.1.tar.gz" "$WORK/libplist.tar.gz"
 fetch "https://github.com/libimobiledevice/libimobiledevice-glue/archive/refs/tags/1.3.0.tar.gz" "$WORK/glue.tar.gz"
 fetch "https://github.com/libimobiledevice/libusbmuxd/archive/refs/tags/2.1.1.tar.gz" "$WORK/libusbmuxd.tar.gz"
-fetch "https://github.com/libimobiledevice/libimobiledevice/archive/refs/tags/1.3.0.tar.gz" "$WORK/libimobiledevice.tar.gz"
+fetch "https://github.com/libimobiledevice/libimobiledevice/archive/refs/tags/1.4.0.tar.gz" "$WORK/libimobiledevice.tar.gz"
+fetch "https://github.com/libimobiledevice/libtatsu/archive/refs/tags/1.0.5.tar.gz" "$WORK/tatsu.tar.gz"
 fetch "https://github.com/libimobiledevice/usbmuxd/archive/3ded00c9985a5108cfc7591a309f9a23d57a8cba.tar.gz" "$WORK/usbmuxd.tar.gz"
-fetch "https://github.com/libimobiledevice/ideviceinstaller/archive/refs/tags/1.1.1.tar.gz" "$WORK/ideviceinstaller.tar.gz"
+fetch "https://github.com/libimobiledevice/ideviceinstaller/archive/refs/heads/master.tar.gz" "$WORK/ideviceinstaller.tar.gz"
 fetch "https://github.com/zhlynn/zsign/archive/refs/tags/v1.1.3.tar.gz" "$WORK/zsign.tar.gz"
 fetch "https://github.com/libusb/libusb/releases/download/v1.0.28/libusb-1.0.28.tar.bz2" "$WORK/libusb.tar.bz2"
 fetch "https://github.com/nih-at/libzip/releases/download/v1.11.4/libzip-1.11.4.tar.gz" "$WORK/libzip.tar.gz"
@@ -100,6 +102,18 @@ printf 'void __ibridge_pthread_stub(void){}\n' > "$WORK/stub.c"
 "$CC" -c "$WORK/stub.c" -o "$WORK/stub.o"
 "$AR" rcs "$PREFIX/lib/libpthread.a" "$WORK/stub.o"
 cp "$PREFIX/lib/libpthread.a" "$PREFIX/lib/librt.a"
+# NDK zlib has no .pc file, but libcurl/libtatsu pkg-config chains ask for it.
+cat > "$PREFIX/lib/pkgconfig/zlib.pc" <<EOF
+prefix=$PREFIX
+includedir=\${prefix}/include
+libdir=\${prefix}/lib
+
+Name: zlib
+Description: zlib compression library
+Version: 1.3.1
+Libs: -L\${libdir} -lz
+Cflags: -I\${includedir}
+EOF
 
 # ---------------------------------------------------------------- OpenSSL
 log "build OpenSSL 3.5.1"
@@ -110,6 +124,21 @@ openssl_dir="$(extract "$WORK/openssl.tar.gz" openssl-3.5.1)"
     --prefix="$PREFIX" --openssldir="$PREFIX/ssl" >/dev/null
   make -j"$JOBS" build_libs >/dev/null
   make install_dev >/dev/null
+)
+
+# ---------------------------------------------------------------- libcurl
+log "build libcurl 8.14.1"
+curl_dir="$(extract "$WORK/curl.tar.gz" curl-8.14.1)"
+(
+  cd "$curl_dir"
+  ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared \
+    --with-openssl="$PREFIX" --without-libpsl --without-libidn2 --without-brotli \
+    --without-zstd --without-nghttp2 --without-libssh2 --disable-ldap --disable-ldaps \
+    --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
+    --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-smb \
+    --disable-manual --disable-threaded-resolver --disable-alt-svc >/dev/null
+  make -j"$JOBS" >/dev/null
+  make install >/dev/null
 )
 
 build_autotools() {
@@ -143,19 +172,33 @@ libusb_dir="$(extract "$WORK/libusb.tar.bz2" libusb-1.0.28)"
   make install >/dev/null
 )
 
-# ---------------------------------------------------------------- libimobiledevice
-log "patch + build libimobiledevice 1.3.0"
-limd_dir="$(extract "$WORK/libimobiledevice.tar.gz" libimobiledevice-1.3.0)"
-python3 - "$limd_dir" <<'PY'
-import re, sys
-root = sys.argv[1]
-p = root + "/common/utils.h"
-s = open(p).read()
-s = re.sub(r"enum plist_format_t \{.*?\};\s*", "", s, flags=re.S)
-s = s.replace("enum plist_format_t format", "plist_format_t format")
+# ---------------------------------------------------------------- libtatsu
+log "build libtatsu 1.0.5"
+tatsu_dir="$(extract "$WORK/tatsu.tar.gz" libtatsu-1.0.5)"
+echo "1.0.5" > "$tatsu_dir/.tarball-version"
+python3 - "$tatsu_dir" <<'PY'
+import sys
+p = sys.argv[1] + "/configure.ac"
+s = open(p).read().replace("[m4_esyscmd(./git-version-gen $RELEASE_VERSION)]", "[1.0.5]")
 open(p, "w").write(s)
-p = root + "/common/utils.c"
-s = open(p).read().replace("enum plist_format_t format", "plist_format_t format")
+PY
+(
+  cd "$tatsu_dir"
+  ./autogen.sh --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared \
+    libcurl_CFLAGS="-I$PREFIX/include" \
+    libcurl_LIBS="-L$PREFIX/lib -lcurl -lssl -lcrypto -lz" >/dev/null
+  make -j"$JOBS" >/dev/null
+  make install >/dev/null
+)
+
+# ---------------------------------------------------------------- libimobiledevice
+log "patch + build libimobiledevice 1.4.0"
+limd_dir="$(extract "$WORK/libimobiledevice.tar.gz" libimobiledevice-1.4.0)"
+python3 - "$limd_dir" <<'PY'
+import sys
+root = sys.argv[1]
+p = root + "/configure.ac"
+s = open(p).read().replace("[m4_esyscmd(./git-version-gen $RELEASE_VERSION)]", "[1.4.0]")
 open(p, "w").write(s)
 p = root + "/common/userpref.c"
 s = open(p).read()
@@ -197,8 +240,14 @@ cmake --build "$WORK/libzip-build" -j"$JOBS" >/dev/null
 cmake --install "$WORK/libzip-build" >/dev/null
 
 # ---------------------------------------------------------------- ideviceinstaller
-log "build ideviceinstaller 1.1.1"
-idi_dir="$(extract "$WORK/ideviceinstaller.tar.gz" ideviceinstaller-1.1.1)"
+log "build ideviceinstaller (master)"
+idi_dir="$(extract "$WORK/ideviceinstaller.tar.gz" ideviceinstaller-master)"
+python3 - "$idi_dir" <<'PY'
+import sys
+p = sys.argv[1] + "/configure.ac"
+s = open(p).read().replace("[m4_esyscmd(./git-version-gen $RELEASE_VERSION)]", "[1.2.0]")
+open(p, "w").write(s)
+PY
 (
   cd "$idi_dir"
   ./autogen.sh --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared \
