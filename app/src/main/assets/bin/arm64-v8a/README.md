@@ -5,11 +5,11 @@
 | 文件 | 来源 |
 | --- | --- |
 | `usbmuxd` | usbmuxd 1.1.1（静态链接 libusb / libplist / glue） |
-| `idevice_id` | libimobiledevice 1.3.0 |
-| `ideviceinfo` | libimobiledevice 1.3.0 |
-| `idevicepair` | libimobiledevice 1.3.0 |
-| `ideviceinstaller` | ideviceinstaller 1.1.1（静态链接 libzip） |
-| `zsign` | zsign（静态链接 OpenSSL 3.5.1、内置 zlib/minizip） |
+| `idevice_id` | libimobiledevice 1.4.0 |
+| `ideviceinfo` | libimobiledevice 1.4.0 |
+| `idevicepair` | libimobiledevice 1.4.0 |
+| `ideviceinstaller` | ideviceinstaller master（子命令 CLI，静态链接 libzip） |
+| `zsign` | zsign v1.1.3（静态链接 OpenSSL 3.5.1、内置 zlib/minizip） |
 
 除 bionic 系统库（`libc.so` / `libm.so` / `libdl.so` / `liblog.so` / `libz.so`）外，
 这些二进制已静态链接第三方依赖，不依赖 Termux 或外部 `.so`。
