@@ -15,9 +15,10 @@ local.properties
 .DS_Store
 Thumbs.db
 
-# Signing material — never commit
+# Signing material — never commit (the stable sideload key is intentionally tracked)
 *.jks
 *.keystore
+!app/keystore/ibridge-release.jks
 *.p12
 *.mobileprovision
 keystore.properties

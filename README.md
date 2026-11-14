@@ -14,6 +14,13 @@ IPA 重签**，并支持签名后一键安装。
 > 授予 Root 权限即可直接配对、安装、卸载与重签。工具构建来源与许可证见
 > [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
+## 下载
+
+- **最新 Release**：<https://github.com/la-1314/ibridge/releases/latest>
+- 下载 `iBridge-<version>-arm64-v8a.apk` 安装即可；需要 Root（Magisk / KernelSU / APatch）
+  与 USB OTG 数据线。
+- Release APK 使用仓库内置的固定侧载签名证书，后续版本可直接覆盖安装。
+
 ## 功能
 
 - **USB OTG 设备管理**
@@ -149,8 +156,9 @@ tag 自动使用 `v1.0.<run_number>`。
 | `IBRIDGE_KEY_ALIAS` | key alias |
 | `IBRIDGE_KEY_PASSWORD` | key 密码 |
 
-未提供 keystore 时会使用 debug 签名，方便个人侧载；不同 CI 机器生成的 debug key 不同，
-覆盖安装前请先卸载旧版本，或配置固定证书。
+未提供 keystore 时使用仓库内置的固定侧载证书
+（`app/keystore/ibridge-release.jks`），因此连续构建的 APK 可以直接覆盖安装。该证书仅用于
+个人侧载，不适用于应用商店分发；如需替换，配置上方 `IBRIDGE_KEYSTORE_*` secrets 即可覆盖。
 
 ## 使用流程
 
